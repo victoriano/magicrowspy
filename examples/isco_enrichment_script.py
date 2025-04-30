@@ -51,7 +51,7 @@ async def main():
         input_df.iloc[10:12], 
         "ISCO/ISCOTasks_preset.ts", 
         reasoning=False, 
-        log_requests=True,
+        log_requests=False,
         log_summary=True
     )
     print("Enrichment completed for Tasks.")

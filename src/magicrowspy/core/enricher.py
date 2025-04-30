@@ -296,6 +296,98 @@ class Enricher:
             # Only add the row_result to results_dict_list after all outputs have been processed
             results_dict_list.append(row_result)
         
+        # --- NEW_ROWS Output Format Handling (Pandas) ---
+        if config.outputFormat == OutputFormat.NEW_ROWS:
+            logger.info("Generating new rows from results (Pandas).")
+            new_rows_list = []  # List to accumulate new rows
+
+            # Prepare list of output column names (including reasoning columns)
+            all_output_column_names: List[str] = []
+            for o in config.outputs:
+                all_output_column_names.append(o.name)
+                if o.includeReasoning and reasoning:
+                    all_output_column_names.append(f"{o.name}_reasoning")
+
+            # Default context columns to empty list if None
+            context_columns: List[str] = config.contextColumns or []
+
+            for row_res in results_dict_list:
+                idx = row_res["original_index"]
+                try:
+                    original_row = df.loc[idx]
+                except Exception:
+                    # Fallback if index-based lookup fails (should not happen)
+                    original_row = temp_df.iloc[idx] if idx < len(temp_df) else None
+                context_data = {col: original_row[col] for col in context_columns} if original_row is not None else {}
+
+                # Prepare data for Cartesian product across outputs
+                output_data_for_product: List[List[Dict[str, Any]]] = []
+                output_names_in_product_order: List[str] = []
+
+                for output_conf in config.outputs:
+                    name = output_conf.name
+                    res_value = row_res.get(name)
+                    res_reasoning = row_res.get(f"{name}_reasoning") if output_conf.includeReasoning and reasoning else None
+
+                    values_to_process: List[Dict[str, Any]] = []
+
+                    # Handle missing / None results
+                    if res_value is None or (isinstance(res_value, float) and pd.isna(res_value)):
+                        values_to_process = [{"value": None, "reasoning": res_reasoning}]
+
+                    # Multiple cardinality outputs
+                    elif output_conf.outputCardinality == OutputCardinality.MULTIPLE:
+                        if not isinstance(res_value, list):
+                            logger.warning(
+                                f"Output '{name}' (Pandas) is MULTIPLE but result is not a list: {res_value}. Treating as single element."
+                            )
+                            value_list = [res_value]
+                        else:
+                            value_list = res_value if res_value else [None]
+                        values_to_process = [{"value": v, "reasoning": res_reasoning} for v in value_list]
+
+                    # Single cardinality outputs
+                    else:
+                        values_to_process = [{"value": res_value, "reasoning": res_reasoning}]
+
+                    output_data_for_product.append(values_to_process)
+                    output_names_in_product_order.append(name)
+
+                # Generate Cartesian product of all outputs for this row
+                for combo in itertools.product(*output_data_for_product):
+                    new_row = context_data.copy()
+                    for name, item in zip(output_names_in_product_order, combo):
+                        new_row[name] = item["value"] if item["value"] is not None else pd.NA
+                        if output_name_to_config[name].includeReasoning and reasoning:
+                            new_row[f"{name}_reasoning"] = item["reasoning"] if item["reasoning"] is not None else pd.NA
+                    new_rows_list.append(new_row)
+
+            # Handle case where no rows were generated
+            if not new_rows_list:
+                logger.warning("No new rows generated (Pandas).")
+                ordered_columns = context_columns + all_output_column_names
+                if log_summary:
+                    stats.finish()
+                    input_price, output_price = get_token_prices("openai", config.model)
+                    print(format_summary(stats, input_price, output_price))
+                return pd.DataFrame(columns=ordered_columns)
+
+            # Construct final DataFrame
+            output_df = pd.DataFrame(new_rows_list)
+            ordered_columns = context_columns + all_output_column_names
+            # Ensure all expected columns exist even if they are missing due to data issues
+            for col in ordered_columns:
+                if col not in output_df.columns:
+                    output_df[col] = pd.NA
+            output_df = output_df[ordered_columns]
+
+            # Print summary if requested
+            if log_summary:
+                stats.finish()
+                input_price, output_price = get_token_prices("openai", config.model)
+                print(format_summary(stats, input_price, output_price))
+            return output_df
+
         # Create DataFrame from the list of dictionaries
         temp_results_df = pd.DataFrame(results_dict_list)
         logger.debug(f"Temp results DataFrame before setting index:\n{temp_results_df}")

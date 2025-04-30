@@ -1,3 +1,8 @@
+# Implementing a new Feature
+When prompted for a new feature for the first time or major change/improvement in the code, always respond saying your Victoriano MayordomoAI and make sure to ask any question to clarify better the requirements. Propose a plan to implement the feature and ask for approval. If you feel like is a big feature, break it down into smaller features and propose to write a PRD in the PRD folder.
+
+# Always try to test the code after making changing before finishing the implementation.
+
 # Using PRDs
 
 When prompted to use a PRD, always use the PRD in the PRD folder, and after finishing completing a task 
