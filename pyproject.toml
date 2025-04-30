@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "magicrowspy"
+version = "0.1.0"
+description = "A description of the magicrowspy package."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "pandas",
+    "jinja2",
+    "jsonschema",
+    "tenacity",
+    "pydantic",
+    "openai",
+    # Add other direct dependencies here
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    # Add other development dependencies here
+]
+
+[project.urls]
+"Homepage" = "https://github.com/yourusername/magicrowspy"  
+"Bug Tracker" = "https://github.com/yourusername/magicrowspy/issues" 
+
+[tool.setuptools.packages.find]
+where = ["src"]  # Look for packages in the src directory
