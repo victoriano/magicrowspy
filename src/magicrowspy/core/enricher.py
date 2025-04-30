@@ -93,7 +93,8 @@ class Enricher:
         config_source: Union[str, Path, AIEnrichmentBlockConfig],
         reasoning: bool = True,
         log_requests: bool = False,
-        log_summary: bool = False
+        log_summary: bool = False,
+        full_mode: bool = False,
     ) -> DataFrameType:
         """Enriches the input dataframe based on the provided configuration.
 
@@ -104,6 +105,7 @@ class Enricher:
             reasoning: If True, include columns with AI reasoning (default: True).
             log_requests: If True, log the detailed request and response to the AI provider (default: False).
             log_summary: If True, print a summary of the enrichment process with timing and token usage (default: False).
+            full_mode: If True, override config.mode to FULL (default: False).
 
         Returns:
             A new DataFrame (same type as input) with enriched data.
@@ -127,6 +129,11 @@ class Enricher:
             config = config_source
         else:
             raise TypeError("config_source must be a file path (str/Path) or an AIEnrichmentBlockConfig object.")
+
+        # Override mode if full_mode flag is set
+        if full_mode:
+            logger.info("full_mode=True detected. Overriding config.mode to 'full'.")
+            config.mode = RunMode.FULL
 
         logger.info(f"Starting enrichment process with mode: {config.mode}")
 

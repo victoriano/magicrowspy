@@ -37,11 +37,12 @@ async def main():
     print("Starting enrichment for Tasks...")
     
     output_df_tasks = await enricher.enrich(
-        input_df.iloc[10:14], 
+        input_df.iloc[9:16], 
         "ISCO/ISCOTasks_preset.ts", 
         reasoning=False, 
         log_requests=False,
-        log_summary=True
+        log_summary=True,
+        full_mode=True
     )
     print("Enrichment completed for Tasks.")
 
