@@ -36,11 +36,23 @@ async def main():
 
     # --- Run Enrichment --- 
     print("Starting enrichment for Tasks...")
+    
+    # Using the new log_summary parameter to display statistics:
+    # - Shows total number of rows processed
+    # - Reports API call statistics (successes, timing)
+    # - Tracks token usage (input/output)
+    # - Estimates costs based on the model's pricing
+    # 
+    # This helps monitor:
+    # 1. Performance (total and per-row times)
+    # 2. Token efficiency
+    # 3. Cost implications
     output_df_tasks = await enricher.enrich(
         input_df.iloc[10:12], 
         "ISCO/ISCOTasks_preset.ts", 
         reasoning=True, 
-        log_requests=True
+        log_requests=True,
+        log_summary=True
     )
     print("Enrichment completed for Tasks.")
 

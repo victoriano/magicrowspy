@@ -1,13 +1,14 @@
 """Core data enrichment orchestrator."""
 
 import logging
-from typing import List, Union, Dict, Any, Optional
+from typing import List, Union, Dict, Any, Optional, Tuple
 from pathlib import Path # Add Path import
 from jinja2 import Environment, Template
 import jsonschema # For validation after getting result
 import json # For parsing JSON string from OpenAI
 import os # To potentially read API keys from environment
 import itertools # Added for Cartesian product
+import time # For timing operations
 
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
@@ -59,6 +60,10 @@ except ImportError:
     APITimeoutError = Exception
     logger.warning("OpenAI client not installed. `pip install openai` or `poetry add openai`")
 
+# Enrichment statistics tracking
+from magicrowspy.core.enrichment_stats import CallStats, EnrichmentStats, format_summary
+from magicrowspy.utils.cost_utils import get_token_prices
+
 class Enricher:
     """Orchestrates the AI enrichment process for dataframes."""
 
@@ -87,7 +92,8 @@ class Enricher:
         input_df: DataFrameType,
         config_source: Union[str, Path, AIEnrichmentBlockConfig],
         reasoning: bool = True,
-        log_requests: bool = False
+        log_requests: bool = False,
+        log_summary: bool = False
     ) -> DataFrameType:
         """Enriches the input dataframe based on the provided configuration.
 
@@ -97,6 +103,7 @@ class Enricher:
                            or a pre-validated AIEnrichmentBlockConfig object.
             reasoning: If True, include columns with AI reasoning (default: True).
             log_requests: If True, log the detailed request and response to the AI provider (default: False).
+            log_summary: If True, print a summary of the enrichment process with timing and token usage (default: False).
 
         Returns:
             A new DataFrame (same type as input) with enriched data.
@@ -143,11 +150,11 @@ class Enricher:
         if is_pandas:
             logger.debug("Processing with pandas backend.")
             # Pass the loaded/validated config object
-            return await self._enrich_pandas(input_df, config, provider_conf, reasoning, log_requests)
+            return await self._enrich_pandas(input_df, config, provider_conf, reasoning, log_requests, log_summary)
         elif is_polars:
             logger.debug("Processing with polars backend.")
             # Pass the loaded/validated config object
-            return await self._enrich_polars(input_df, config, provider_conf, reasoning, log_requests)
+            return await self._enrich_polars(input_df, config, provider_conf, reasoning, log_requests, log_summary)
         else:
             # Should be unreachable due to the earlier check
             raise TypeError("Unsupported DataFrame type.") 
@@ -158,9 +165,13 @@ class Enricher:
         config: AIEnrichmentBlockConfig,
         provider_conf: BaseProviderConfig,
         reasoning: bool,
-        log_requests: bool
+        log_requests: bool,
+        log_summary: bool = False
     ):
         logger.info(f"--- Entering _enrich_pandas --- Mode: {config.mode}, Format: {config.outputFormat} (Type: {type(config.outputFormat)}) ---")
+        
+        # Initialize statistics tracking
+        stats = EnrichmentStats(total_rows=len(df))
         
         # Determine which columns to keep in preview mode
         preview_columns_to_keep = []
@@ -234,7 +245,7 @@ class Enricher:
                 
                 try:
                     # Call the AI provider
-                    result = self._call_provider(
+                    provider_result, call_stats = self._call_provider(
                         provider_conf=provider_conf,
                         model=model,
                         temperature=temperature,
@@ -244,12 +255,15 @@ class Enricher:
                         log_requests=log_requests
                     )
                     
+                    # Add call stats to our tracker
+                    stats.add_call(call_stats)
+                    
                     # Debug the result from the provider
-                    logger.debug(f"Provider result for {field}: {result}")
+                    logger.debug(f"Provider result for {field}: {provider_result}")
 
                     # Process the actual result from the provider
-                    if result and field in result:
-                        provider_data = result[field] # This is either the value or {"value": ..., "reasoning": ...}
+                    if provider_result and field in provider_result:
+                        provider_data = provider_result[field] # This is either the value or {"value": ..., "reasoning": ...}
                         
                         if includes_reasoning and reasoning:
                             if isinstance(provider_data, dict) and "value" in provider_data:
@@ -301,16 +315,25 @@ class Enricher:
             results_df = results_df.reindex(df.index) # Reindex ensures alignment
             output_df = pd.concat([df, results_df], axis=1)
             logger.debug(f"Output DataFrame after concat (regular merge):\n{output_df}")
+        
+        # Print summary if requested
+        if log_summary:
+            stats.finish()
+            # Use model-specific pricing
+            input_price, output_price = get_token_prices("openai", config.model)
+            print(format_summary(stats, input_price, output_price))
+        
         return output_df
 
     async def _enrich_polars(
         self,
-        df: 'pl.DataFrame',
+        df: PolarsDataFrame,
         config: AIEnrichmentBlockConfig,
         provider_conf: BaseProviderConfig,
         reasoning: bool,
-        log_requests: bool
-    ) -> 'pl.DataFrame':
+        log_requests: bool,
+        log_summary: bool = False
+    ) -> PolarsDataFrame:
         """Enrichment logic for Polars DataFrames, including reasoning."""
         provider_conf = next((p for p in self.providers if p.integrationName == config.integrationName), None)
         if not provider_conf:
@@ -376,7 +399,7 @@ class Enricher:
 
                 # 4. Call Provider
                 try:
-                    provider_result = self._call_provider(
+                    provider_result, call_stats = self._call_provider(
                         provider_conf=provider_conf,
                         model=config.model,
                         temperature=config.temperature,
@@ -385,6 +408,9 @@ class Enricher:
                         prompt=rendered_prompt,
                         log_requests=log_requests
                     )
+                    
+                    # Add call stats to our tracker
+                    stats.add_call(call_stats)
                     
                     # Process the actual provider result
                     if provider_result and output_conf.name in provider_result:
@@ -585,6 +611,12 @@ class Enricher:
             if not new_rows_list:
                 logger.warning("No new rows generated (Polars).")
                 ordered_columns = config.contextColumns + all_output_column_names
+                # Print summary if requested
+                if log_summary:
+                    stats.finish()
+                    # Use defaults for pricing since we have no model information
+                    input_price, output_price = get_token_prices("openai", config.model)
+                    print(format_summary(stats, input_price, output_price))
                 return pl.DataFrame({col: [] for col in ordered_columns}) # Empty DF with schema
 
             output_df = pl.from_dicts(new_rows_list) # Create DataFrame from list of dicts
@@ -593,6 +625,12 @@ class Enricher:
             # Select columns in the desired order, handling potential missing columns
             existing_ordered_columns = [col for col in ordered_columns if col in output_df.columns]
             output_df = output_df.select(existing_ordered_columns)
+            # Print summary if requested
+            if log_summary:
+                stats.finish()
+                # Use model-specific pricing
+                input_price, output_price = get_token_prices("openai", config.model)
+                print(format_summary(stats, input_price, output_price))
             return output_df
 
     def _render_prompt(self, template: str, row_data) -> str:
@@ -623,10 +661,14 @@ class Enricher:
         output_schema: Dict[str, Any],
         prompt: Optional[str] = None,
         log_requests: bool = False
-    ):
-        """Call the OpenAI API with appropriate error handling and detailed logging."""
+    ) -> Tuple[Optional[Dict[str, Any]], CallStats]:
+        """Call the provider API with appropriate error handling and detailed logging."""
         import json
         import os
+        
+        # Initialize call stats
+        call_stats = CallStats(model=model, provider="openai")
+        start_time = time.perf_counter()
         
         # Log the provider configuration
         logger.info(f"Provider configuration: {provider_conf}")
@@ -636,6 +678,7 @@ class Enricher:
         if provider_type is None:
             provider_type = getattr(provider_conf, "type", "openai")
         
+        call_stats.provider = provider_type.lower()
         logger.info(f"Using provider type: {provider_type}")
         
         # Check if we should use OpenAI
@@ -647,7 +690,8 @@ class Enricher:
                 api_key = getattr(provider_conf, "apiKey", None) or os.environ.get("OPENAI_API_KEY")
                 if not api_key:
                     logger.error("No OpenAI API key found. Using fallback values.")
-                    return None
+                    call_stats.success = False
+                    return None, call_stats
                 
                 # Create OpenAI client
                 client = OpenAI(api_key=api_key)
@@ -708,6 +752,14 @@ class Enricher:
                         stream=False,
                         response_format=response_format
                     )
+                    
+                    # Record the time taken for the API call
+                    call_stats.api_time = time.perf_counter() - start_time
+                    
+                    # Extract token usage information if available
+                    if hasattr(response, "usage"):
+                        call_stats.prompt_tokens = response.usage.prompt_tokens
+                        call_stats.completion_tokens = response.usage.completion_tokens
 
                     # Log the complete response if requested
                     if log_requests:
@@ -734,25 +786,26 @@ class Enricher:
                                 # Fallback – use parsed_content as-is
                                 main_data = parsed_content
 
-                            return {output_name: main_data}
+                            return {output_name: main_data}, call_stats
                         except json.JSONDecodeError as e:
                             logger.error(f"Failed to parse JSON content from response: {e}")
                             logger.error(f"Raw content: {response.choices[0].message.content}")
-                            return None
+                            call_stats.success = False
+                            return None, call_stats
                 except Exception as e:
                     logger.error(f"OpenAI API call failed: {str(e)}")
-                    return None
+                    call_stats.success = False
+                    return None, call_stats
             except ImportError:
                 logger.error("OpenAI package not installed. Using fallback values.")
-                return None
+                call_stats.success = False
+                return None, call_stats
             except Exception as e:
                 logger.error(f"Unexpected error in OpenAI provider call: {str(e)}")
-                return None
+                call_stats.success = False
+                return None, call_stats
         else:
+            # Handle other provider types here
             logger.error(f"Unsupported provider type: {provider_type}")
-            return None
-
-    # Simplified placeholder for provider retry mechanism
-    def _call_provider_with_retry(self, *args, **kwargs) -> Any:
-        """Simplified placeholder for provider retry mechanism."""
-        return None
+            call_stats.success = False
+            return None, call_stats

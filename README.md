@@ -94,6 +94,49 @@ The `enricher.enrich(config_source=...)` method accepts the preset configuration
 
 *   **Pre-loaded Config Object:** You can also manually load and validate a config object using `magicrowspy.config.load_preset` and pass the resulting `AIEnrichmentBlockConfig` object directly (though this is less common for typical usage).
 
+### Performance Monitoring with log_summary
+
+Enable detailed enrichment statistics by setting `log_summary=True`:
+
+```python
+enriched_df = await enricher.enrich(
+    input_df=my_dataframe,
+    config_source="path/to/my_preset.ts",
+    log_summary=True  # Print performance metrics and cost estimates
+)
+```
+
+This provides a detailed summary after completion:
+
+```
+========== Enrichment Summary ==========
+Total Rows Processed: 10
+Successful API Calls: 20
+------------------------------------
+Total Time Elapsed:   4.2991 s
+Total API Time:       7.5262 s
+Total Processing Time:-3.2271 s (Total - API)
+Avg. API Time/Call:   1.8815 s
+Avg. Total Time/Row:  2.1495 s
+------------------------------------
+Input Tokens:         520
+Output Tokens:        1010
+Total Tokens:         1530
+------------------------------------
+Estimated Input Cost: $0.002600 (@ $5.0/M)
+Estimated Output Cost:$0.015150 (@ $15.0/M)
+Estimated Total Cost: $0.017750
+======================================
+```
+
+This helps you:
+- Monitor performance (time per row, time per API call)
+- Track token usage
+- Estimate costs based on current pricing
+- Identify optimization opportunities
+
+Pricing estimates use model-specific rates from a configurable pricing database.
+
 ### Example Script
 
 See `magicrowspy/scripts_examples/simple_enrichment_script.py` for a runnable example.
