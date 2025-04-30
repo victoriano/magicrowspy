@@ -16,7 +16,7 @@ export const ISCOtasksConfig: AIEnrichmentBlockConfig = {
   "outputs": [
     {
       "name": "automation_tasks",
-      "prompt": "For the profession described by NACE code {{nace}} and ISCO code {{isco}}, identify 5 specific tasks with high AI automation potential.",
+      "prompt": "For the profession described by NACE code {{nace}} and ISCO code {{isco}}, identify specific tasks with high AI automation potential.",
       "outputType": "text",
       "outputCardinality": "multiple"
     }

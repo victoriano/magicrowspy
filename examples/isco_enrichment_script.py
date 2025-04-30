@@ -8,7 +8,6 @@ import pandas as pd
 from magicrowspy import Enricher # load_preset is no longer needed here
 from magicrowspy.config import OpenAIProviderConfig
 
-
 # Path to input CSV (adjust as needed)
 CSV_INPUT_PATH_STR = "/Users/victoriano/Desktop/MagicRows Data/Tasks EU15.csv"
 
@@ -37,29 +36,14 @@ async def main():
     # --- Run Enrichment --- 
     print("Starting enrichment for Tasks...")
     
-    # Using the new log_summary parameter to display statistics:
-    # - Shows total number of rows processed
-    # - Reports API call statistics (successes, timing)
-    # - Tracks token usage (input/output)
-    # - Estimates costs based on the model's pricing
-    # 
-    # This helps monitor:
-    # 1. Performance (total and per-row times)
-    # 2. Token efficiency
-    # 3. Cost implications
     output_df_tasks = await enricher.enrich(
-        input_df.iloc[10:12], 
+        input_df.iloc[10:14], 
         "ISCO/ISCOTasks_preset.ts", 
         reasoning=False, 
         log_requests=False,
         log_summary=True
     )
     print("Enrichment completed for Tasks.")
-
-    # print("Starting enrichment for Novelty...")
-    # # Pass the preset name string directly
-    # output_df_novelty = await enricher.enrich(input_df.copy(), PRESET_NAME_NOVELTY)
-    # print("Enrichment completed for Novelty.")
 
     # --- Export Results --- 
     desktop_path = Path.home() / "Desktop"
@@ -71,12 +55,6 @@ async def main():
     output_path_tasks = desktop_path / output_filename_tasks
     output_df_tasks.to_csv(output_path_tasks, index=False)
     print(f"Successfully wrote Tasks output CSV: {output_path_tasks}")
-
-    # # Export Novelty
-    # output_filename_novelty = f"{csv_input_path.stem}_enriched_novelty_{timestamp}{csv_input_path.suffix}"
-    # output_path_novelty = desktop_path / output_filename_novelty
-    # output_df_novelty.to_csv(output_path_novelty, index=False)
-    # print(f"Successfully wrote Novelty output CSV: {output_path_novelty}")
 
 # --- Run --- 
 if __name__ == "__main__":
